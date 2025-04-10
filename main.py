@@ -1,4 +1,5 @@
 import re
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession
@@ -7,9 +8,11 @@ from requests_html import HTMLSession,AsyncHTMLSession
 from fastapi import FastAPI, Path, Query, HTTPException, status
 from fastapi.responses import JSONResponse
 
+app = FastAPI(title="async parser")
 
-
-
+def is_valid_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and parsed.netloc != ""
 
 async def fetch_url_with_aiohttp(url: str) -> str:
     async with ClientSession() as session :
@@ -26,7 +29,33 @@ async def fetch_url_with_request_html(url: str) -> str:
             return response.html
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
        
+@app.get("/parse/")
+async def parse_page(
+    url: str = Query(..., description="URL сторінки для парсингу"),
+    tag: str = Query("div", description="HTML-тег, в якому шукати"),
+    text: str = Query(..., description="Фрагмент тексту для пошуку")
+):
+     if not is_valid_url(url):
+          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Wrong URL")
+     
+     html = await fetch_url_with_request_html(url)
+     soup = BeautifulSoup(html, "lxml")
 
+     result = soup.find(string=re.compile(re.escape(text)))
+     if result:
+         parent = result.find_parent(tag)
+         return {
+             "status": "success",
+             "found": True,
+             "content": parent.get_text(strip=True)
+         }
+     return {
+        "status": "success",
+        "found": False,
+        "message": "Текст не знайдено"
+    }
+               
+          
 
 
 def get_html(url: str) -> str:
